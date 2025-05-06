@@ -11,28 +11,44 @@ using app.src.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 namespace app.src.Controller
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class AuthController(IAuthService authService) : ControllerBase
+    public class AuthController(IAuthService authService, UserManager<User> userManager, SignInManager<User> signInManager) : ControllerBase
     {
-        public static User user = new();
         [HttpPost("register")]
-        public async Task<ActionResult<User>> Register(UserDto request)
+        public async Task<ActionResult<User?>> Register([FromBody] UserDto request)
         {
-           var user = await authService.RegisterAsync(request);
-           if (user == null){ return BadRequest("UserName Already Exists");}
+            var appUser = new User
+            {
+                UserName = request.UserName
+            };
 
-           return Ok(user);
+           var user =  await userManager.CreateAsync(appUser, request.Password);
+            if(user.Succeeded)
+                {
+                    var roleResult = await userManager.AddToRoleAsync(appUser, "User");
+                    if(roleResult.Succeeded) { return Ok(); }
+                    else{ return StatusCode(500, roleResult.Errors); }
+                }
+            else{ return StatusCode(500, user.Errors); }
         }
 
         [HttpPost("login")]
-        public async Task<ActionResult<string>> Login(UserDto request)
+        public async Task<ActionResult<string>> Login([FromBody] UserDto request)
         {  
+            var user = await userManager.Users.FirstOrDefaultAsync(x => x.UserName.ToLower() == request.UserName.ToLower());
+            if(user == null) return Unauthorized("Invalid UserName!");
+            var result = await signInManager.CheckPasswordSignInAsync(user, request.Password, false);
+
+            if(!result.Succeeded) return Unauthorized("UserName notFound and/or Password Incorrect"); 
+
             var token = await authService.LoginAsync(request);
+
             if(token == null){ return BadRequest("Invalid Credentials");}
 
             return Ok(token);
